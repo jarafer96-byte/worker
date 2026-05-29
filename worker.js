@@ -29,7 +29,7 @@ export default {
     const objectKey = `productos/${email_vendedor}/${Date.now()}-${fileName}`;
 
     // Endpoint nativo de R2
-    const endpoint = 'https://mpage-db.a2f89bcf2254aa9ff406c31073099c0c.r2.cloudflarestorage.com';
+    const endpoint = 'https://img.mpagina.com.ar';
 
     // Generar la URL prefirmada
     const presignedUrl = await generatePresignedUrl(

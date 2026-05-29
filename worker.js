@@ -63,14 +63,13 @@ async function generatePresignedUrl(endpoint, objectKey, accessKeyId, secretAcce
   const verb = 'PUT';
   const host = new URL(endpoint).host;
   const date = new Date();
-  const amzDate = date.toISOString().replace(/[:-]|\.\d{3}/g, ''); // YYYYMMDDTHHMMSSZ
-  const dateStamp = amzDate.substring(0, 8); // YYYYMMDD
+  const amzDate = date.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.substring(0, 8);
 
   const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
   const credentialValue = `${accessKeyId}/${credentialScope}`;
 
-  // Parámetros para la URL (codificados normalmente)
-  const encodedParams = {
+  const params = {
     'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
     'X-Amz-Credential': encodeURIComponent(credentialValue),
     'X-Amz-Date': amzDate,
@@ -78,29 +77,11 @@ async function generatePresignedUrl(endpoint, objectKey, accessKeyId, secretAcce
     'X-Amz-SignedHeaders': 'host',
   };
 
-  // Parámetros para el canonical request (codificación especial: solo reemplazar %2F por /)
-  const canonicalParams = {
-    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
-    'X-Amz-Credential': credentialValue.replace(/\//g, '/'), // ya tiene /, solo por claridad
-    'X-Amz-Date': amzDate,
-    'X-Amz-Expires': expires.toString(),
-    'X-Amz-SignedHeaders': 'host',
-  };
+  const sortedKeys = Object.keys(params).sort();
+  const canonicalQuerystring = sortedKeys.map(key => `${key}=${params[key]}`).join('&');
+  const queryString = canonicalQuerystring; // mismo valor
 
-  // Orden alfabético
-  const sortedKeys = Object.keys(canonicalParams).sort();
-
-  // Canonical querystring: valores sin codificar (pero reemplazamos %2F por / en el credential si hiciera falta)
-  const canonicalQuerystring = sortedKeys
-    .map(key => `${key}=${canonicalParams[key]}`)
-    .join('&');
-
-  // Query string para la URL final: valores codificados
-  const queryString = sortedKeys
-    .map(key => `${key}=${encodedParams[key]}`)
-    .join('&');
-
-  const canonicalUri = '/' + objectKey; // ya viene con %40, etc.
+  const canonicalUri = '/' + objectKey;
   const canonicalHeaders = `host:${host}\n`;
   const signedHeaders = 'host';
   const payloadHash = 'UNSIGNED-PAYLOAD';

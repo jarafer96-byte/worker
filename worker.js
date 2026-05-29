@@ -1,86 +1,38 @@
-export default {
-  async fetch(request, env) {
-    if (request.method !== 'POST') {
-      return new Response('Method not allowed', { status: 405 });
-    }
-
-    const authToken = request.headers.get('X-Auth-Token');
-    if (!authToken || authToken !== env.AUTH_TOKEN_SECRET) {
-      return new Response('Unauthorized', { status: 401 });
-    }
-
-    let requestData;
-    try {
-      requestData = await request.json();
-    } catch (e) {
-      return new Response('Invalid JSON', { status: 400 });
-    }
-
-    const { fileName, contentType, email_vendedor } = requestData;
-    if (!fileName || !contentType || !email_vendedor) {
-      return new Response('Missing fileName, contentType, or email_vendedor', { status: 400 });
-    }
-
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
-    if (!allowedTypes.includes(contentType)) {
-      return new Response('Tipo de archivo no permitido', { status: 400 });
-    }
-
-    const objectKey = `productos/${email_vendedor}/${Date.now()}-${fileName}`;
-
-    // Configuración de R2 (usa el endpoint de tu cuenta)
-    const accountId = 'a2f89bcf2254aa9ff406c31073099c0c';
-    const bucketName = 'mpage-db';
-    const endpoint = 'https://mpage-db.a2f89bcf2254aa9ff406c31073099c0c.r2.cloudflarestorage.com';
-
-    // Generar la URL prefirmada
-    const presignedUrl = await generatePresignedUrl(
-      endpoint,
-      objectKey,
-      env.R2_ACCESS_KEY_ID,
-      env.R2_SECRET_ACCESS_KEY,
-      'auto',       // region
-      's3',         // service
-      3600,         // expira en 1 hora
-      contentType
-    );
-
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        url: presignedUrl,
-        key: objectKey,
-      }),
-      {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
-  },
-};
-
-/**
- * Genera una URL prefirmada tipo AWS Signature V4 para subir objetos (PUT).
- * Usa la Web Crypto API (disponible en Cloudflare Workers).
- */
 async function generatePresignedUrl(endpoint, objectKey, accessKeyId, secretAccessKey, region, service, expires, contentType) {
   const verb = 'PUT';
   const host = new URL(endpoint).host;
   const date = new Date();
-  const amzDate = date.toISOString().replace(/[:-]|\.\d{3}/g, ''); // formato: YYYYMMDD'T'HHMMSS'Z'
+  const amzDate = date.toISOString().replace(/[:-]|\.\d{3}/g, ''); // YYYYMMDDTHHMMSSZ
   const dateStamp = amzDate.substring(0, 8); // YYYYMMDD
 
-  // Paso 1: Crear la solicitud canónica
-  const canonicalUri = '/' + objectKey;
-  const canonicalQuerystring = [
-    'X-Amz-Algorithm=AWS4-HMAC-SHA256',
-    'X-Amz-Credential=' + encodeURIComponent(accessKeyId + '/' + dateStamp + '/' + region + '/' + service + '/aws4_request'),
-    'X-Amz-Date=' + amzDate,
-    'X-Amz-Expires=' + expires,
-    'X-Amz-SignedHeaders=host',
-  ].join('&');
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
 
-  const canonicalHeaders = 'host:' + host + '\n';
+  // Valor del credential sin codificar (para canonical request)
+  const credentialValue = `${accessKeyId}/${credentialScope}`;
+
+  // Parámetros en orden alfabético, con valores codificados para la URL
+  const params = {
+    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
+    'X-Amz-Credential': credentialValue,
+    'X-Amz-Date': amzDate,
+    'X-Amz-Expires': expires.toString(),
+    'X-Amz-SignedHeaders': 'host',
+  };
+
+  // Construir canonical querystring con valores SIN codificar (excepto el path que ya está codificado)
+  const canonicalQuerystring = Object.entries(params)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}=${v}`) // v sin codificar
+    .join('&');
+
+  // Construir la query string para la URL final (valores codificados)
+  const queryString = Object.entries(params)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+    .join('&');
+
+  const canonicalUri = '/' + objectKey; // el objectKey ya viene codificado (test%40test.com)
+  const canonicalHeaders = `host:${host}\n`;
   const signedHeaders = 'host';
   const payloadHash = 'UNSIGNED-PAYLOAD';
 
@@ -93,54 +45,19 @@ async function generatePresignedUrl(endpoint, objectKey, accessKeyId, secretAcce
     payloadHash,
   ].join('\n');
 
-  // Paso 2: Crear la cadena a firmar
-  const algorithm = 'AWS4-HMAC-SHA256';
-  const credentialScope = dateStamp + '/' + region + '/' + service + '/aws4_request';
   const stringToSign = [
-    algorithm,
+    'AWS4-HMAC-SHA256',
     amzDate,
     credentialScope,
     await sha256(canonicalRequest),
   ].join('\n');
 
-  // Paso 3: Calcular la firma
   const signingKey = await getSignatureKey(secretAccessKey, dateStamp, region, service);
   const signature = await hmacHex(signingKey, stringToSign);
 
-  // Paso 4: Construir la URL final
   const url = new URL(endpoint);
   url.pathname = '/' + objectKey;
-  url.search = canonicalQuerystring + '&X-Amz-Signature=' + signature;
+  url.search = queryString + '&X-Amz-Signature=' + signature;
 
   return url.toString();
-}
-
-async function sha256(message) {
-  const msgBuffer = new TextEncoder().encode(message);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function hmacHex(key, data) {
-  const keyBuffer = typeof key === 'string' ? new TextEncoder().encode(key) : key;
-  const dataBuffer = new TextEncoder().encode(data);
-  const hmacBuffer = await crypto.subtle.sign('HMAC', await crypto.subtle.importKey('raw', keyBuffer, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']), dataBuffer);
-  const hmacArray = Array.from(new Uint8Array(hmacBuffer));
-  return hmacArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function getSignatureKey(secretAccessKey, dateStamp, region, service) {
-  const kDate = await hmacRaw('AWS4' + secretAccessKey, dateStamp);
-  const kRegion = await hmacRaw(kDate, region);
-  const kService = await hmacRaw(kRegion, service);
-  const kSigning = await hmacRaw(kService, 'aws4_request');
-  return kSigning;
-}
-
-async function hmacRaw(key, data) {
-  const keyBuffer = typeof key === 'string' ? new TextEncoder().encode(key) : key;
-  const dataBuffer = new TextEncoder().encode(data);
-  const hmacBuffer = await crypto.subtle.sign('HMAC', await crypto.subtle.importKey('raw', keyBuffer, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']), dataBuffer);
-  return new Uint8Array(hmacBuffer);
 }

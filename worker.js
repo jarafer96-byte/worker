@@ -31,7 +31,7 @@ export default {
     // Configuración de R2 (usa el endpoint de tu cuenta)
     const accountId = 'a2f89bcf2254aa9ff406c31073099c0c';
     const bucketName = 'mpage-db';
-    const endpoint = `https://${bucketName}.${accountId}.r2.cloudflarestorage.com`;
+    const endpoint = 'https://img.mpagina.com.ar';
 
     // Generar la URL prefirmada
     const presignedUrl = await generatePresignedUrl(

@@ -63,13 +63,14 @@ async function generatePresignedUrl(endpoint, objectKey, accessKeyId, secretAcce
   const verb = 'PUT';
   const host = new URL(endpoint).host;
   const date = new Date();
-  const amzDate = date.toISOString().replace(/[:-]|\.\d{3}/g, '');
-  const dateStamp = amzDate.substring(0, 8);
+  const amzDate = date.toISOString().replace(/[:-]|\.\d{3}/g, ''); // YYYYMMDDTHHMMSSZ
+  const dateStamp = amzDate.substring(0, 8); // YYYYMMDD
 
   const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
   const credentialValue = `${accessKeyId}/${credentialScope}`;
 
-  const params = {
+  // Parámetros para la URL final (codificados normalmente)
+  const encodedParams = {
     'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
     'X-Amz-Credential': encodeURIComponent(credentialValue),
     'X-Amz-Date': amzDate,
@@ -77,11 +78,31 @@ async function generatePresignedUrl(endpoint, objectKey, accessKeyId, secretAcce
     'X-Amz-SignedHeaders': 'host',
   };
 
-  const sortedKeys = Object.keys(params).sort();
-  const canonicalQuerystring = sortedKeys.map(key => `${key}=${params[key]}`).join('&');
-  const queryString = canonicalQuerystring; // mismo valor
+  // Parámetros para construir la canonical request (valores sin codificar)
+  const canonicalParams = {
+    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
+    'X-Amz-Credential': credentialValue, // ya incluye las barras
+    'X-Amz-Date': amzDate,
+    'X-Amz-Expires': expires.toString(),
+    'X-Amz-SignedHeaders': 'host',
+  };
 
-  const canonicalUri = '/' + objectKey;
+  // Orden alfabético
+  const sortedKeys = Object.keys(canonicalParams).sort();
+
+  // CORRECCIÓN 1: canonicalUri debe codificar caracteres especiales pero mantener las '/' sin codificar
+  const canonicalUri = '/' + encodeURIComponent(objectKey).replace(/%2F/g, '/');
+
+  // CORRECCIÓN 2: canonicalQuerystring debe codificar los valores (las barras se vuelven %2F)
+  const canonicalQuerystring = sortedKeys
+    .map(key => `${key}=${encodeURIComponent(canonicalParams[key])}`)
+    .join('&');
+
+  // Query string para la URL final: valores codificados (ya lo teníamos)
+  const queryString = sortedKeys
+    .map(key => `${key}=${encodedParams[key]}`)
+    .join('&');
+
   const canonicalHeaders = `host:${host}\n`;
   const signedHeaders = 'host';
   const payloadHash = 'UNSIGNED-PAYLOAD';
@@ -106,7 +127,7 @@ async function generatePresignedUrl(endpoint, objectKey, accessKeyId, secretAcce
   const signature = await hmacHex(signingKey, stringToSign);
 
   const url = new URL(endpoint);
-  url.pathname = '/' + objectKey;
+  url.pathname = '/' + objectKey; // la URL final no necesita codificación manual, el objeto URL se encarga
   url.search = queryString + '&X-Amz-Signature=' + signature;
 
   return url.toString();

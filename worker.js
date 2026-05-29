@@ -1,3 +1,5 @@
+import { AwsClient } from 'https://esm.sh/aws4fetch@1.0.20';
+
 export default {
   async fetch(request, env) {
     if (request.method !== 'POST') {
@@ -27,19 +29,30 @@ export default {
     }
 
     const objectKey = `productos/${email_vendedor}/${Date.now()}-${fileName}`;
-    const bucket = env.UPLOADS_BUCKET;
 
-    // Esta es la línea clave
-    const presignedUrl = await bucket.createPresignedUrl({
+    // Configurar cliente S3 con las credenciales de R2
+    const r2 = new AwsClient({
+      accessKeyId: env.R2_ACCESS_KEY_ID,
+      secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+      region: 'auto',
+      service: 's3',
+    });
+
+    // URL base de tu bucket (usá el endpoint de S3 de tu cuenta)
+    const endpoint = 'https://a2f89bcf2254aa9ff406c31073099c0c.r2.cloudflarestorage.com';
+    const url = new URL(`/${objectKey}`, endpoint);
+
+    // Firmar la petición como URL prefirmada (PUT)
+    const presigned = await r2.sign(url, {
       method: 'PUT',
-      object: objectKey,
-      expiresIn: 3600,
+      headers: { 'Content-Type': contentType },
+      aws: { signQuery: true, expiresIn: 3600 },
     });
 
     return new Response(
       JSON.stringify({
         ok: true,
-        url: presignedUrl,
+        url: presigned.url,
         key: objectKey,
       }),
       {

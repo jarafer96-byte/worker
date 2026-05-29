@@ -28,7 +28,7 @@ export default {
 
     const objectKey = `productos/${email_vendedor}/${Date.now()}-${fileName}`;
 
-    // Configuración de R2 (endpoint nativo)
+    // Endpoint nativo de R2
     const endpoint = 'https://mpage-db.a2f89bcf2254aa9ff406c31073099c0c.r2.cloudflarestorage.com';
 
     // Generar la URL prefirmada
@@ -69,25 +69,35 @@ async function generatePresignedUrl(endpoint, objectKey, accessKeyId, secretAcce
   const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
   const credentialValue = `${accessKeyId}/${credentialScope}`;
 
-  // Parámetros en orden alfabético (sin codificar para el canonical request)
-  const params = {
+  // Parámetros para la URL (codificados normalmente)
+  const encodedParams = {
     'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
-    'X-Amz-Credential': credentialValue,
+    'X-Amz-Credential': encodeURIComponent(credentialValue),
     'X-Amz-Date': amzDate,
     'X-Amz-Expires': expires.toString(),
     'X-Amz-SignedHeaders': 'host',
   };
 
-  // Canonical querystring: sin codificar
-  const canonicalQuerystring = Object.entries(params)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => `${k}=${v}`)
+  // Parámetros para el canonical request (codificación especial: solo reemplazar %2F por /)
+  const canonicalParams = {
+    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
+    'X-Amz-Credential': credentialValue.replace(/\//g, '/'), // ya tiene /, solo por claridad
+    'X-Amz-Date': amzDate,
+    'X-Amz-Expires': expires.toString(),
+    'X-Amz-SignedHeaders': 'host',
+  };
+
+  // Orden alfabético
+  const sortedKeys = Object.keys(canonicalParams).sort();
+
+  // Canonical querystring: valores sin codificar (pero reemplazamos %2F por / en el credential si hiciera falta)
+  const canonicalQuerystring = sortedKeys
+    .map(key => `${key}=${canonicalParams[key]}`)
     .join('&');
 
-  // Query string para la URL: codificar los valores
-  const queryString = Object.entries(params)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+  // Query string para la URL final: valores codificados
+  const queryString = sortedKeys
+    .map(key => `${key}=${encodedParams[key]}`)
     .join('&');
 
   const canonicalUri = '/' + objectKey; // ya viene con %40, etc.

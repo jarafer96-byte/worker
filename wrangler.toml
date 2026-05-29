@@ -1,0 +1,8 @@
+name = "tiny-bush-6e5c"
+main = "worker.js"
+compatibility_date = "2024-12-16"
+compatibility_flags = ["r2_create_presigned_url"]
+
+[[r2_buckets]]
+binding = "UPLOADS_BUCKET"
+bucket_name = "mpage-db"
